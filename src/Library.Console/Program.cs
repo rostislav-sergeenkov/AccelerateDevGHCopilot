@@ -12,13 +12,15 @@ var configuration = new ConfigurationBuilder()
 
 services.AddSingleton<IConfiguration>(configuration);
 
+// Register JsonData first before repositories that depend on it
+services.AddSingleton<JsonData>();
+
 services.AddScoped<IPatronRepository, JsonPatronRepository>();
 services.AddScoped<ILoanRepository, JsonLoanRepository>();
 services.AddScoped<Library.ApplicationCore.Interfaces.IBookRepository, JsonBookRepository>();
 services.AddScoped<ILoanService, LoanService>();
 services.AddScoped<IPatronService, PatronService>();
 
-services.AddSingleton<JsonData>();
 services.AddSingleton<ConsoleApp>();
 
 var servicesProvider = services.BuildServiceProvider();
