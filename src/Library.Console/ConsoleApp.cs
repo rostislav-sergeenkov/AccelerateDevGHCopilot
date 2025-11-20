@@ -3,6 +3,24 @@ using Library.ApplicationCore.Entities;
 using Library.ApplicationCore.Enums;
 using Library.Console;
 
+// Added missing interface definition for book repository
+public interface IBookRepository
+{
+    Task<List<Book>> SearchBooks(string title);
+}
+
+// Added missing JsonData definition used by ConsoleApp
+public class JsonData
+{
+    public List<BookItem>? BookItems { get; set; }
+    public List<Loan>? Loans { get; set; }
+
+    public Task EnsureDataLoaded()
+    {
+        return Task.CompletedTask;
+    }
+}
+
 public class ConsoleApp
 {
     ConsoleState _currentState = ConsoleState.PatronSearch;
@@ -16,13 +34,17 @@ public class ConsoleApp
     ILoanRepository _loanRepository;
     ILoanService _loanService;
     IPatronService _patronService;
+    IBookRepository _bookRepository;
+    JsonData _jsonData;
 
-    public ConsoleApp(ILoanService loanService, IPatronService patronService, IPatronRepository patronRepository, ILoanRepository loanRepository)
+    public ConsoleApp(ILoanService loanService, IPatronService patronService, IPatronRepository patronRepository, ILoanRepository loanRepository, IBookRepository bookRepository, JsonData jsonData)
     {
         _patronRepository = patronRepository;
         _loanRepository = loanRepository;
         _loanService = loanService;
         _patronService = patronService;
+        _bookRepository = bookRepository;
+        _jsonData = jsonData;
     }
 
     public async Task Run()
@@ -136,6 +158,7 @@ public class ConsoleApp
             {
                 "q" when options.HasFlag(CommonActions.Quit) => CommonActions.Quit,
                 "s" when options.HasFlag(CommonActions.SearchPatrons) => CommonActions.SearchPatrons,
+                "b" when options.HasFlag(CommonActions.SearchBooks) => CommonActions.SearchBooks,
                 "m" when options.HasFlag(CommonActions.RenewPatronMembership) => CommonActions.RenewPatronMembership,
                 "e" when options.HasFlag(CommonActions.ExtendLoanedBook) => CommonActions.ExtendLoanedBook,
                 "r" when options.HasFlag(CommonActions.ReturnLoanedBook) => CommonActions.ReturnLoanedBook,
@@ -166,6 +189,10 @@ public class ConsoleApp
         {
             Console.WriteLine(" - \"m\" to extend patron's membership");
         }
+        if (options.HasFlag(CommonActions.SearchBooks))
+        {
+            Console.WriteLine(" - \"b\" to check for book availability");
+        }
         if (options.HasFlag(CommonActions.SearchPatrons))
         {
             Console.WriteLine(" - \"s\" for new search");
@@ -193,7 +220,7 @@ public class ConsoleApp
             loanNumber++;
         }
 
-        CommonActions options = CommonActions.SearchPatrons | CommonActions.Quit | CommonActions.Select | CommonActions.RenewPatronMembership;
+        CommonActions options = CommonActions.SearchPatrons | CommonActions.Quit | CommonActions.Select | CommonActions.RenewPatronMembership | CommonActions.SearchBooks;
         CommonActions action = ReadInputOptions(options, out int selectedLoanNumber);
         if (action == CommonActions.Select)
         {
@@ -221,12 +248,67 @@ public class ConsoleApp
         {
             var status = await _patronService.RenewMembership(selectedPatronDetails.Id);
             Console.WriteLine(EnumHelper.GetDescription(status));
-            // reloading after renewing membership
             selectedPatronDetails = (await _patronRepository.GetPatron(selectedPatronDetails.Id))!;
             return ConsoleState.PatronDetails;
         }
+        else if (action == CommonActions.SearchBooks)
+        {
+            return await SearchBooks();
+        }
 
         throw new InvalidOperationException("An input option is not handled.");
+    }
+
+    async Task<ConsoleState> SearchBooks()
+    {
+        string? bookTitle = null;
+        while (string.IsNullOrWhiteSpace(bookTitle))
+        {
+            Console.Write("Enter a book title to search for: ");
+            bookTitle = Console.ReadLine();
+
+            if (string.IsNullOrWhiteSpace(bookTitle))
+            {
+                Console.WriteLine("Book title cannot be empty. Please try again.");
+            }
+        }
+
+        var books = await _bookRepository.SearchBooks(bookTitle);
+
+        if (books.Count == 0)
+        {
+            Console.WriteLine("No books found matching the search criteria.");
+            return ConsoleState.PatronDetails;
+        }
+
+        await _jsonData.EnsureDataLoaded();
+
+        foreach (var book in books)
+        {
+            Console.WriteLine($"{book.Title}");
+
+            var bookItem = _jsonData.BookItems!.FirstOrDefault(bi => bi.BookId == book.Id);
+
+            if (bookItem == null)
+            {
+                Console.WriteLine("  No book item available in inventory.");
+                continue;
+            }
+
+            var activeLoan = _jsonData.Loans!.FirstOrDefault(l => l.BookItemId == bookItem.Id && l.ReturnDate == null);
+
+            if (activeLoan == null)
+            {
+                Console.WriteLine($"  {book.Title} is available for loan.");
+            }
+            else
+            {
+                Console.WriteLine($"  {book.Title} is on loan to another patron. The return due date is {activeLoan.DueDate}.");
+            }
+        }
+
+        Console.WriteLine();
+        return ConsoleState.PatronDetails;
     }
 
     async Task<ConsoleState> LoanDetails()
